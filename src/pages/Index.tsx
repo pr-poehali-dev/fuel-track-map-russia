@@ -10,16 +10,23 @@ type Station = {
   brand: string;
   address: string;
   city: string;
-  x: number;
-  y: number;
+  px: number; // позиция на SVG-карте %
+  py: number;
   fuel: Fuel;
   rating: number;
 };
 
-// Реальные средние цены по России — июль 2026 (по данным Росстат / мониторинг АЗС)
+type MapPin = {
+  id: string;
+  px: number;
+  py: number;
+  status: 'yes' | 'no';
+  label: string;
+  ts: number;
+};
+
 const RUSSIA_AVG: Fuel = { ai92: 53.80, ai95: 58.60, ai98: 65.40, dt: 67.20 };
 
-// Разброс цен по городу относительно среднего
 const CITY_DELTA: Record<string, Partial<Fuel>> = {
   'Москва':           { ai92: +2.1, ai95: +2.4, ai98: +3.0, dt: +1.8 },
   'Санкт-Петербург':  { ai92: +1.8, ai95: +2.1, ai98: +2.7, dt: +1.5 },
@@ -31,15 +38,16 @@ const CITY_DELTA: Record<string, Partial<Fuel>> = {
   'Ростов-на-Дону':   { ai92: -0.3, ai95: -0.1, ai98: +0.6, dt: -0.5 },
 };
 
+// Позиции городов в % от размера SVG viewBox (0–100)
 const CITIES = [
-  { name: 'Москва',          x: 41, y: 40, lat: 55.7558, lon: 37.6173, zoom: 10 },
-  { name: 'Санкт-Петербург', x: 36, y: 30, lat: 59.9343, lon: 30.3351, zoom: 10 },
-  { name: 'Казань',          x: 50, y: 45, lat: 55.7963, lon: 49.1088, zoom: 11 },
-  { name: 'Екатеринбург',    x: 58, y: 42, lat: 56.8389, lon: 60.6057, zoom: 11 },
-  { name: 'Новосибирск',     x: 68, y: 52, lat: 55.0084, lon: 82.9357, zoom: 11 },
-  { name: 'Краснодар',       x: 38, y: 62, lat: 45.0355, lon: 38.9753, zoom: 11 },
-  { name: 'Нижний Новгород', x: 46, y: 41, lat: 56.2965, lon: 43.9361, zoom: 11 },
-  { name: 'Ростов-на-Дону',  x: 39, y: 58, lat: 47.2357, lon: 39.7015, zoom: 11 },
+  { name: 'Москва',          px: 38, py: 37, zoom: 10 },
+  { name: 'Санкт-Петербург', px: 32, py: 24, zoom: 10 },
+  { name: 'Казань',          px: 50, py: 38, zoom: 11 },
+  { name: 'Екатеринбург',    px: 60, py: 34, zoom: 11 },
+  { name: 'Новосибирск',     px: 72, py: 42, zoom: 11 },
+  { name: 'Краснодар',       px: 37, py: 56, zoom: 11 },
+  { name: 'Нижний Новгород', px: 45, py: 36, zoom: 11 },
+  { name: 'Ростов-на-Дону',  px: 40, py: 52, zoom: 11 },
 ];
 
 const BRANDS = ['Лукойл', 'Газпромнефть', 'Роснефть', 'Татнефть', 'Башнефть', 'Нефтьмагистраль'];
@@ -64,20 +72,17 @@ const STATIONS: Station[] = Array.from({ length: 34 }).map((_, i) => {
     brand: BRANDS[i % BRANDS.length],
     address: `ул. ${['Ленина', 'Мира', 'Гагарина', 'Советская', 'Кольцевая'][i % 5]}, ${10 + i}`,
     city: city.name,
-    x: city.x + (Math.random() * 8 - 4),
-    y: city.y + (Math.random() * 8 - 4),
+    px: city.px + (Math.random() * 7 - 3.5),
+    py: city.py + (Math.random() * 7 - 3.5),
     fuel: makeFuel(city.name),
     rating: +(3.8 + Math.random() * 1.2).toFixed(1),
   };
 });
 
-// Начальные голоса — имитируем что уже проголосовали люди
 const initVotes = (): Record<number, Vote> => {
   const map: Record<number, Vote> = {};
   STATIONS.forEach((s) => {
-    const yes = Math.floor(Math.random() * 18) + 2;
-    const no  = Math.floor(Math.random() * 8);
-    map[s.id] = { yes, no, userVote: null };
+    map[s.id] = { yes: Math.floor(Math.random() * 18) + 2, no: Math.floor(Math.random() * 8), userVote: null };
   });
   return map;
 };
@@ -89,6 +94,15 @@ const FUEL_LABELS: { key: keyof Fuel; label: string; color: string }[] = [
   { key: 'dt',   label: 'ДТ',    color: '#ea580c' },
 ];
 
+// SVG-контур России (упрощённый, достаточный для демо)
+const RUSSIA_PATH = `
+  M 18,28 L 22,22 L 28,18 L 34,16 L 38,14 L 44,13 L 50,13 L 56,14 L 62,13
+  L 68,14 L 74,15 L 80,17 L 85,20 L 88,24 L 90,28 L 89,33 L 86,37
+  L 88,40 L 87,44 L 84,47 L 80,50 L 76,52 L 72,55 L 68,57 L 64,58
+  L 60,60 L 55,62 L 50,63 L 44,62 L 38,61 L 34,60 L 30,62 L 26,64
+  L 22,63 L 18,60 L 14,56 L 12,51 L 12,46 L 14,41 L 16,36 L 16,31 Z
+`;
+
 const Index = () => {
   const [query, setQuery] = useState('');
   const [activeCity, setActiveCity] = useState<string | null>(null);
@@ -97,6 +111,16 @@ const Index = () => {
   const [showSuggest, setShowSuggest] = useState(false);
   const [votes, setVotes] = useState<Record<number, Vote>>(initVotes);
   const [justVoted, setJustVoted] = useState<number | null>(null);
+
+  // Состояние для пользовательских меток на карте
+  const [mapPins, setMapPins] = useState<MapPin[]>([]);
+  const [pendingPin, setPendingPin] = useState<{ px: number; py: number } | null>(null);
+  const [pinStation, setPinStation] = useState<Station | null>(null);
+  const [addMode, setAddMode] = useState(false);
+  const [pinLabel, setPinLabel] = useState('');
+  const [showPinSuccess, setShowPinSuccess] = useState(false);
+
+  const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -139,7 +163,7 @@ const Index = () => {
   const castVote = (stationId: number, vote: FuelStatus) => {
     setVotes((prev) => {
       const cur = prev[stationId];
-      if (cur.userVote === vote) return prev; // уже голосовал так
+      if (cur.userVote === vote) return prev;
       const next = { ...cur };
       if (cur.userVote === 'yes') next.yes = Math.max(0, next.yes - 1);
       if (cur.userVote === 'no')  next.no  = Math.max(0, next.no  - 1);
@@ -152,13 +176,54 @@ const Index = () => {
     setTimeout(() => setJustVoted(null), 1500);
   };
 
-  const mapUrl = useMemo(() => {
-    const city = CITIES.find((c) => c.name === (selected?.city || activeCity));
-    if (city) {
-      return `https://yandex.ru/map-widget/v1/?ll=${city.lon}%2C${city.lat}&z=${city.zoom}&text=${encodeURIComponent('заправки ' + city.name)}`;
-    }
-    return `https://yandex.ru/map-widget/v1/?ll=60%2C60&z=3&text=${encodeURIComponent('заправки')}`;
-  }, [activeCity, selected]);
+  // Клик по карте в режиме добавления метки
+  const handleMapClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!addMode) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * 100;
+    const py = ((e.clientY - rect.top) / rect.height) * 100;
+
+    // Найти ближайшую АЗС
+    let nearest: Station | null = null;
+    let minDist = Infinity;
+    STATIONS.forEach((s) => {
+      const dist = Math.hypot(s.px - px, s.py - py);
+      if (dist < minDist) { minDist = dist; nearest = s; }
+    });
+
+    setPendingPin({ px, py });
+    setPinStation(nearest);
+    setPinLabel('');
+  };
+
+  const submitPin = (status: 'yes' | 'no') => {
+    if (!pendingPin) return;
+    const station = pinStation;
+    const newPin: MapPin = {
+      id: Date.now().toString(),
+      px: pendingPin.px,
+      py: pendingPin.py,
+      status,
+      label: pinLabel.trim() || (station ? `${station.brand}, ${station.address}` : 'АЗС'),
+      ts: Date.now(),
+    };
+    setMapPins((prev) => [...prev, newPin]);
+    // Обновить голос ближайшей АЗС
+    if (station) castVote(station.id, status);
+    setPendingPin(null);
+    setPinStation(null);
+    setAddMode(false);
+    setShowPinSuccess(true);
+    setTimeout(() => setShowPinSuccess(false), 2500);
+  };
+
+  const cancelPin = () => {
+    setPendingPin(null);
+    setPinStation(null);
+    setAddMode(false);
+  };
 
   const fuelMeta = FUEL_LABELS.find((f) => f.key === fuelType)!;
 
@@ -203,7 +268,7 @@ const Index = () => {
           Где заправиться <span className="text-green-600">выгоднее</span>?
         </h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Актуальные цены + народный мониторинг: сообщайте, есть ли бензин на АЗС прямо сейчас.
+          Актуальные цены + народный мониторинг: кликайте на карту и отмечайте наличие бензина.
         </p>
 
         {/* Search */}
@@ -256,26 +321,172 @@ const Index = () => {
 
       {/* Map + list */}
       <section className="mx-auto grid max-w-7xl gap-6 px-6 pb-16 lg:grid-cols-[1.6fr_1fr]">
-        {/* Map */}
-        <div className="relative overflow-hidden rounded-2xl border border-border bg-[#f7f9fb]">
+
+        {/* ===== SVG MAP ===== */}
+        <div className="relative overflow-hidden rounded-2xl border border-border bg-[#eef4fb] shadow-sm">
+
+          {/* Легенда */}
           <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-3 rounded-lg bg-white/90 px-3 py-2 text-xs shadow-sm backdrop-blur">
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-green-600" /> дёшево</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-yellow-500" /> средне</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-600" /> дорого</span>
           </div>
-          <iframe
-            title="Карта заправок"
-            src={mapUrl}
-            className="h-full min-h-[440px] w-full border-0"
-            allowFullScreen
-            loading="lazy"
-          />
+
+          {/* Кнопка режима добавления метки */}
+          <button
+            onClick={() => { setAddMode((v) => !v); setPendingPin(null); }}
+            className={`absolute right-4 top-4 z-10 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition ${
+              addMode
+                ? 'bg-amber-500 text-white'
+                : 'bg-white/90 text-foreground backdrop-blur hover:bg-white'
+            }`}
+          >
+            <Icon name={addMode ? 'X' : 'MapPin'} size={14} />
+            {addMode ? 'Отменить' : '+ Отметить АЗС'}
+          </button>
+
+          {/* Подсказка режима */}
+          {addMode && !pendingPin && (
+            <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 animate-fade-in rounded-xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-lg">
+              Кликните на карте по нужной АЗС
+            </div>
+          )}
+
+          {/* Уведомление об успехе */}
+          {showPinSuccess && (
+            <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 animate-fade-in rounded-xl bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow-lg">
+              ✓ Метка добавлена! Спасибо за информацию
+            </div>
+          )}
+
+          {/* Попап выбора статуса */}
+          {pendingPin && (
+            <div
+              className="absolute z-20 animate-scale-in"
+              style={{
+                left: `${Math.min(pendingPin.px, 70)}%`,
+                top: `${Math.max(pendingPin.py - 18, 5)}%`,
+              }}
+            >
+              <div className="rounded-2xl border border-border bg-white p-4 shadow-xl w-64">
+                <div className="mb-1 font-semibold text-sm">Отметить статус АЗС</div>
+                {pinStation && (
+                  <div className="mb-3 text-xs text-muted-foreground">
+                    {pinStation.brand} · {pinStation.city}, {pinStation.address}
+                  </div>
+                )}
+                <input
+                  value={pinLabel}
+                  onChange={(e) => setPinLabel(e.target.value)}
+                  placeholder="Комментарий (необязательно)"
+                  className="mb-3 w-full rounded-lg border border-border px-3 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => submitPin('yes')}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-green-600 py-2.5 text-xs font-bold text-white transition hover:bg-green-700"
+                  >
+                    <Icon name="CheckCircle" size={14} /> Есть бензин
+                  </button>
+                  <button
+                    onClick={() => submitPin('no')}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-red-600 py-2.5 text-xs font-bold text-white transition hover:bg-red-700"
+                  >
+                    <Icon name="XCircle" size={14} /> Нет бензина
+                  </button>
+                </div>
+                <button onClick={cancelPin} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground">
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SVG карта */}
+          <svg
+            ref={svgRef}
+            viewBox="0 0 100 78"
+            className={`h-full min-h-[480px] w-full select-none ${addMode ? 'cursor-crosshair' : 'cursor-default'}`}
+            onClick={handleMapClick}
+          >
+            <defs>
+              <pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
+                <path d="M 4 0 L 0 0 0 4" fill="none" stroke="#dce8f5" strokeWidth="0.15" />
+              </pattern>
+              <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="1" stdDeviation="1" floodOpacity="0.12" />
+              </filter>
+            </defs>
+
+            {/* Фон */}
+            <rect width="100" height="78" fill="#dce8f5" />
+            <rect width="100" height="78" fill="url(#grid)" />
+
+            {/* Основной контур России */}
+            <path d={RUSSIA_PATH} fill="#c8dff0" stroke="#a8c8e8" strokeWidth="0.4" filter="url(#shadow)" />
+
+            {/* Внутренние детали — реки/регионы (имитация) */}
+            <path d="M 38,37 Q 42,34 46,36 Q 50,38 54,36" stroke="#a8c8e8" strokeWidth="0.3" fill="none" opacity="0.6"/>
+            <path d="M 30,44 Q 34,42 38,44 Q 40,46 42,48" stroke="#a8c8e8" strokeWidth="0.3" fill="none" opacity="0.5"/>
+            <path d="M 60,34 Q 64,36 68,38 Q 72,40 76,42" stroke="#a8c8e8" strokeWidth="0.3" fill="none" opacity="0.5"/>
+
+            {/* Названия городов */}
+            {CITIES.map((c) => (
+              <text key={c.name} x={c.px} y={c.py - 3.5} textAnchor="middle"
+                fontSize="2" fill="#5a7a9a" fontFamily="Golos Text, sans-serif" opacity="0.8">
+                {c.name}
+              </text>
+            ))}
+
+            {/* Метки АЗС */}
+            {STATIONS.map((s) => {
+              const dim = activeCity && s.city !== activeCity;
+              const isSel = selected?.id === s.id;
+              const color = priceColor(s.fuel[fuelType]);
+              const v = votes[s.id];
+              const hasGas = v.yes + v.no > 0 ? v.yes >= v.no : null;
+              return (
+                <g key={s.id} opacity={dim ? 0.15 : 1} className="cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); if (!addMode) setSelected(s); }}>
+                  {isSel && (
+                    <circle cx={s.px} cy={s.py} r="3.5" fill={color} opacity="0.2" className="animate-ping-slow" />
+                  )}
+                  <circle cx={s.px} cy={s.py} r={isSel ? 2.2 : 1.5}
+                    fill={color} stroke="#fff" strokeWidth="0.4" />
+                  {/* Значок статуса бензина */}
+                  {hasGas !== null && (
+                    <circle cx={s.px + 1.6} cy={s.py - 1.6} r="1"
+                      fill={hasGas ? '#16a34a' : '#dc2626'} stroke="#fff" strokeWidth="0.3" />
+                  )}
+                </g>
+              );
+            })}
+
+            {/* Пользовательские метки */}
+            {mapPins.map((pin) => (
+              <g key={pin.id}>
+                <circle cx={pin.px} cy={pin.py} r="2.2"
+                  fill={pin.status === 'yes' ? '#16a34a' : '#dc2626'}
+                  stroke="#fff" strokeWidth="0.5" opacity="0.95" />
+                <text x={pin.px} y={pin.py - 2.8} textAnchor="middle"
+                  fontSize="1.8" fill={pin.status === 'yes' ? '#16a34a' : '#dc2626'}
+                  fontFamily="Golos Text, sans-serif" fontWeight="bold">
+                  {pin.status === 'yes' ? '✓' : '✗'}
+                </text>
+              </g>
+            ))}
+
+            {/* Курсор при добавлении метки */}
+            {pendingPin && (
+              <circle cx={pendingPin.px} cy={pendingPin.py} r="2.5"
+                fill="#f59e0b" stroke="#fff" strokeWidth="0.5" opacity="0.9" />
+            )}
+          </svg>
         </div>
 
         {/* Panel */}
         <div className="flex flex-col">
           {selected ? (
-            /* Station detail */
             <div className="animate-fade-in rounded-2xl border border-border bg-white p-5 shadow-sm">
               <button onClick={() => setSelected(null)}
                 className="mb-3 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
@@ -316,17 +527,14 @@ const Index = () => {
                 <div className="mb-3 flex items-center gap-1.5 text-sm font-semibold">
                   <Icon name="Users" size={15} /> Есть бензин сейчас?
                 </div>
-
                 {(() => {
                   const v = votes[selected.id];
                   const total = v.yes + v.no;
                   const yesPct = total ? Math.round((v.yes / total) * 100) : 50;
                   return (
                     <>
-                      {/* Кнопки голосования */}
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => castVote(selected.id, 'yes')}
+                        <button onClick={() => castVote(selected.id, 'yes')}
                           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium transition ${
                             v.userVote === 'yes'
                               ? 'bg-green-600 text-white shadow-sm'
@@ -334,8 +542,7 @@ const Index = () => {
                           }`}>
                           <Icon name="CheckCircle" size={16} /> Есть
                         </button>
-                        <button
-                          onClick={() => castVote(selected.id, 'no')}
+                        <button onClick={() => castVote(selected.id, 'no')}
                           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium transition ${
                             v.userVote === 'no'
                               ? 'bg-red-600 text-white shadow-sm'
@@ -344,14 +551,9 @@ const Index = () => {
                           <Icon name="XCircle" size={16} /> Нет
                         </button>
                       </div>
-
-                      {/* Прогресс-бар */}
                       <div className="mt-3">
                         <div className="flex h-2 overflow-hidden rounded-full bg-red-100">
-                          <div
-                            className="bg-green-500 transition-all duration-500"
-                            style={{ width: `${yesPct}%` }}
-                          />
+                          <div className="bg-green-500 transition-all duration-500" style={{ width: `${yesPct}%` }} />
                         </div>
                         <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
                           <span className="text-green-700 font-medium">{v.yes} — есть ({yesPct}%)</span>
@@ -359,11 +561,10 @@ const Index = () => {
                         </div>
                         {justVoted === selected.id && (
                           <div className="mt-2 animate-fade-in text-center text-xs font-medium text-green-600">
-                            Спасибо! Ваш голос учтён 👍
+                            Спасибо! Ваш голос учтён
                           </div>
                         )}
                       </div>
-
                       <div className="mt-2 text-[11px] text-muted-foreground text-center">
                         {total} {total === 1 ? 'голос' : total < 5 ? 'голоса' : 'голосов'} за последние 2 часа
                       </div>
@@ -377,7 +578,6 @@ const Index = () => {
               </button>
             </div>
           ) : (
-            /* Stations list */
             <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-border px-5 py-3">
                 <span className="font-display text-base tracking-wide">
@@ -399,8 +599,7 @@ const Index = () => {
                         <div className="truncate text-sm font-medium">{s.brand}</div>
                         <div className="truncate text-xs text-muted-foreground">{s.city}, {s.address}</div>
                       </div>
-                      {/* Статус бензина */}
-                      {hasGas === null ? null : (
+                      {hasGas !== null && (
                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           hasGas ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
                         }`}>
@@ -414,11 +613,31 @@ const Index = () => {
               </div>
             </div>
           )}
+
+          {/* Лента последних меток */}
+          {mapPins.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-border bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                <Icon name="Activity" size={15} /> Последние отметки
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {[...mapPins].reverse().slice(0, 4).map((pin) => (
+                  <div key={pin.id} className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2 text-xs">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${pin.status === 'yes' ? 'bg-green-600' : 'bg-red-600'}`} />
+                    <span className="truncate flex-1 text-foreground">{pin.label}</span>
+                    <span className={`shrink-0 font-semibold ${pin.status === 'yes' ? 'text-green-700' : 'text-red-600'}`}>
+                      {pin.status === 'yes' ? 'есть' : 'нет'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-        Бензин·Карта — средние цены по данным мониторинга АЗС России, июль 2026. Народный мониторинг наличия топлива.
+        Бензин·Карта — демо-версия. Цены по данным мониторинга АЗС России, июль 2026.
       </footer>
     </div>
   );
