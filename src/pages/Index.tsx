@@ -14,14 +14,14 @@ type Station = {
 };
 
 const CITIES = [
-  { name: 'Москва', x: 41, y: 40 },
-  { name: 'Санкт-Петербург', x: 36, y: 30 },
-  { name: 'Казань', x: 50, y: 45 },
-  { name: 'Екатеринбург', x: 58, y: 42 },
-  { name: 'Новосибирск', x: 68, y: 52 },
-  { name: 'Краснодар', x: 38, y: 62 },
-  { name: 'Нижний Новгород', x: 46, y: 41 },
-  { name: 'Ростов-на-Дону', x: 39, y: 58 },
+  { name: 'Москва', x: 41, y: 40, lat: 55.7558, lon: 37.6173, zoom: 10 },
+  { name: 'Санкт-Петербург', x: 36, y: 30, lat: 59.9343, lon: 30.3351, zoom: 10 },
+  { name: 'Казань', x: 50, y: 45, lat: 55.7963, lon: 49.1088, zoom: 11 },
+  { name: 'Екатеринбург', x: 58, y: 42, lat: 56.8389, lon: 60.6057, zoom: 11 },
+  { name: 'Новосибирск', x: 68, y: 52, lat: 55.0084, lon: 82.9357, zoom: 11 },
+  { name: 'Краснодар', x: 38, y: 62, lat: 45.0355, lon: 38.9753, zoom: 11 },
+  { name: 'Нижний Новгород', x: 46, y: 41, lat: 56.2965, lon: 43.9361, zoom: 11 },
+  { name: 'Ростов-на-Дону', x: 39, y: 58, lat: 47.2357, lon: 39.7015, zoom: 11 },
 ];
 
 const BRANDS = ['Лукойл', 'Газпромнефть', 'Роснефть', 'Татнефть', 'Shell', 'Нефтьмагистраль'];
@@ -99,6 +99,14 @@ const Index = () => {
     setShowSuggest(false);
     setSelected(null);
   };
+
+  const mapUrl = useMemo(() => {
+    const city = CITIES.find((c) => c.name === (selected?.city || activeCity));
+    if (city) {
+      return `https://yandex.ru/map-widget/v1/?ll=${city.lon}%2C${city.lat}&z=${city.zoom}&text=${encodeURIComponent('заправки ' + city.name)}`;
+    }
+    return `https://yandex.ru/map-widget/v1/?ll=60%2C60&z=3&text=${encodeURIComponent('заправки')}`;
+  }, [activeCity, selected]);
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
@@ -182,43 +190,19 @@ const Index = () => {
 
       <section className="mx-auto grid max-w-7xl gap-6 px-6 pb-16 lg:grid-cols-[1.6fr_1fr]">
         <div className="relative overflow-hidden rounded-2xl border border-border bg-[#f7f9fb]">
-          <div className="absolute left-4 top-4 z-10 flex items-center gap-3 rounded-lg bg-white/90 px-3 py-2 text-xs shadow-sm backdrop-blur">
+          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-3 rounded-lg bg-white/90 px-3 py-2 text-xs shadow-sm backdrop-blur">
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-green-600" /> дёшево</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-yellow-500" /> средне</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-600" /> дорого</span>
           </div>
 
-          <svg viewBox="0 0 100 75" className="h-full min-h-[440px] w-full">
-            <defs>
-              <pattern id="grid" width="5" height="5" patternUnits="userSpaceOnUse">
-                <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#e5eaf0" strokeWidth="0.2" />
-              </pattern>
-            </defs>
-            <rect width="100" height="75" fill="url(#grid)" />
-            <path
-              d="M20 34 Q28 24 40 26 Q52 20 62 26 Q74 22 84 30 Q90 34 86 42 Q80 52 70 54 Q58 62 46 58 Q34 62 26 54 Q18 46 20 34 Z"
-              fill="#eef2f6"
-              stroke="#d3dbe4"
-              strokeWidth="0.4"
-            />
-
-            {STATIONS.map((s) => {
-              const dim = activeCity && s.city !== activeCity;
-              const isSel = selected?.id === s.id;
-              return (
-                <g
-                  key={s.id}
-                  transform={`translate(${s.x} ${s.y})`}
-                  className="cursor-pointer transition-opacity"
-                  opacity={dim ? 0.2 : 1}
-                  onClick={() => setSelected(s)}
-                >
-                  {isSel && <circle r="2.6" fill={priceColor(s.fuel[fuelType])} opacity="0.3" className="animate-ping-slow" />}
-                  <circle r={isSel ? 1.7 : 1.2} fill={priceColor(s.fuel[fuelType])} stroke="#fff" strokeWidth="0.35" />
-                </g>
-              );
-            })}
-          </svg>
+          <iframe
+            title="Карта заправок"
+            src={mapUrl}
+            className="h-full min-h-[440px] w-full border-0"
+            allowFullScreen
+            loading="lazy"
+          />
         </div>
 
         <div className="flex flex-col">
